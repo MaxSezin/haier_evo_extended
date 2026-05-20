@@ -1,4 +1,4 @@
-# Haier Evo integration
+# Haier Evo Extended integration
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs) [![stability-beta](https://img.shields.io/badge/stability-beta-33bbff.svg)](https://github.com/mkenney/software-guides/blob/master/STABILITY-BADGES.md#beta)
 
 Неофициальная интеграция для работы [Haier Evo](https://haieronline.ru/evo-iot/) (RU, KZ, BY).
