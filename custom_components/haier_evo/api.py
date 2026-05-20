@@ -167,6 +167,7 @@ class Haier(object):
         http: bool = C.API_HTTP_ROUTE
     ) -> None:
         self._lock = threading.Lock()
+        self._send_lock = threading.Lock()
         self._pull_data = None
         self._device_id = str(uuid.uuid4())
         self.hass: HomeAssistant = hass
@@ -577,17 +578,21 @@ class Haier(object):
     @retry(
         retry=retry_if_exception_type(Exception),
         stop=stop_after_attempt(2),
-        retry_error_callback=lambda _: None,
+        retry_error_callback=lambda retry_state: _LOGGER.error(
+            f"Failed to send WS message after {retry_state.attempt_number} attempts: "
+            f"{retry_state.outcome.exception()}"
+        ),
         wait=wait_fixed(0.5),
     )
     def send_message(self, payload: str) -> None:
         _LOGGER.debug(f"Sending message: {payload}")
-        try:
-            self.socket_app.send(payload)
-        except Exception as e:
-            _LOGGER.warning(f"Failed to send message: {e}")
-            self.connect_if_needed()
-            raise e
+        with self._send_lock:
+            try:
+                self.socket_app.send(payload)
+            except Exception as e:
+                _LOGGER.warning(f"Failed to send message: {e}")
+                self.connect_if_needed()
+                raise e
 
 
 class HaierDevice(object):
@@ -760,7 +765,7 @@ class HaierDevice(object):
         if message_type == "status":
             self._handle_status_update(message_dict)
         elif message_type == "command_response":
-            pass
+            _LOGGER.debug(f"Command response: {message_dict}")
         elif message_type == "info":
             self._handle_info(message_dict)
         elif message_type == "deviceStatusEvent":
@@ -1056,7 +1061,7 @@ class HaierAC(HaierDevice):
     def switch_on(self, value: str = None) -> None:
         value = value or self.mode or HVACMode.AUTO
         self._send_commands([
-            *(self.get_commands("status", "on") if not self.status else []),
+            *self.get_commands("status", "on"),
             *self.get_commands("mode", value),
         ])
         self.status = 1
