@@ -582,17 +582,30 @@ class Haier(object):
             f"Failed to send WS message after {retry_state.attempt_number} attempts: "
             f"{retry_state.outcome.exception()}"
         ),
-        wait=wait_fixed(0.5),
+        wait=wait_fixed(1.0),
     )
     def send_message(self, payload: str) -> None:
         _LOGGER.debug(f"Sending message: {payload}")
         with self._send_lock:
+            # Fail fast: don't even attempt to send on a dead socket
+            if self.socket_status != SocketStatus.INITIALIZED:
+                _LOGGER.warning("Socket not ready before send, reconnecting...")
+                self.connect_if_needed()
+                if self.socket_status != SocketStatus.INITIALIZED:
+                    raise ConnectionError("Socket not ready after reconnect attempt")
             try:
                 self.socket_app.send(payload)
             except Exception as e:
                 _LOGGER.warning(f"Failed to send message: {e}")
                 self.connect_if_needed()
                 raise e
+            # Post-send check: detect silent loss when socket closes right after send.
+            # A 60ms window is enough to catch an abrupt close (observed: ~25ms in logs).
+            time.sleep(0.06)
+            if self.socket_status != SocketStatus.INITIALIZED:
+                _LOGGER.warning("Socket closed immediately after send — message likely lost, retrying...")
+                self.connect_if_needed()
+                raise ConnectionError("Socket closed right after send")
 
 
 class HaierDevice(object):
@@ -765,7 +778,11 @@ class HaierDevice(object):
         if message_type == "status":
             self._handle_status_update(message_dict)
         elif message_type == "command_response":
-            _LOGGER.debug(f"Command response: {message_dict}")
+            err_no = message_dict.get("errNo", 0)
+            if err_no != 0:
+                _LOGGER.warning(f"Command rejected by device (errNo={err_no}): {message_dict}")
+            else:
+                _LOGGER.debug(f"Command response: {message_dict}")
         elif message_type == "info":
             self._handle_info(message_dict)
         elif message_type == "deviceStatusEvent":
