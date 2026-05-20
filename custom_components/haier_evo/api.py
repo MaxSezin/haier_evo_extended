@@ -1058,10 +1058,32 @@ class HaierAC(HaierDevice):
         ])
         self.target_temperature = value
 
+    def _get_status_commands(self, turn_on: bool) -> list[dict]:
+        """Build status on/off commands with a guaranteed numeric fallback.
+
+        get_item_code() returns the string "None" when the device API does not
+        provide recognisable label mappings (e.g. non-Russian firmware).
+        In that case we fall back to the well-known numeric values: 1=on, 0=off.
+        """
+        target = "on" if turn_on else "off"
+        fallback_value = "1" if turn_on else "0"
+        cmds = self.get_commands("status", target)
+        if status_code := self.config['status']:
+            if not cmds or any(c.get("value") in (None, "None") for c in cmds):
+                _LOGGER.warning(
+                    f"status mapping for '{target}' not found, "
+                    f"using fallback value '{fallback_value}'"
+                )
+                cmds = self.constraint.apply([{
+                    "commandName": status_code,
+                    "value": fallback_value,
+                }])
+        return cmds
+
     def switch_on(self, value: str = None) -> None:
         value = value or self.mode or HVACMode.AUTO
         self._send_commands([
-            *self.get_commands("status", "on"),
+            *self._get_status_commands(turn_on=True),
             *self.get_commands("mode", value),
         ])
         self.status = 1
@@ -1069,7 +1091,7 @@ class HaierAC(HaierDevice):
 
     def switch_off(self) -> None:
         self._send_commands([
-            *self.get_commands("status", "off"),
+            *self._get_status_commands(turn_on=False),
         ])
         self.status = 0
 
